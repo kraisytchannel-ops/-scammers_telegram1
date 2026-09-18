@@ -10,7 +10,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message
 import aiohttp
 
-TOKEN = "8186611679:AAH2IXX-uATInkuTO3qrzP8df3bJdoxr6hU"
+# Берём токен из переменных окружения Render (безопасно!)
+TOKEN = os.getenv("BOT_TOKEN", "8186611679:AAH2IXX-uATInkuTO3qrzP8df3bJdoxr6hU")
 MODERATOR_CHAT_ID = -5453392098
 ADMIN_IDS = {7346241328, 1753821033}
 DATA_FILE = "bot_data.json"
@@ -59,17 +60,77 @@ async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Действие отменено. Напиши /start для возврата в меню.")
 
-@router.message(Command("stats"))
-async def cmd_stats(message: Message):
+# НОРМАЛЬНАЯ АДМИН-ПАНЕЛЬ ПО КОМАНДЕ /admin
+@router.message(Command("admin"))
+async def cmd_admin(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    await message.answer(
-        f"📊 Статистика бота:\n"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast_help")],
+        [InlineKeyboardButton(text="📝 Создать пост в канал", callback_data="admin_post_help")],
+        [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")]
+    ])
+    await message.answer("👑 **Панель управления администратора**\n\nВыбери нужный раздел:", reply_markup=keyboard)
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Нет доступа", show_alert=True)
+        return
+    
+    stats_text = (
+        f"📊 **Статистика бота:**\n\n"
         f"👥 Всего пользователей: {len(all_users)}\n"
         f"📥 Всего заявок: {bot_stats['total']}\n"
         f"✅ Одобрено: {bot_stats['approved']}\n"
         f"❌ Отклонено: {bot_stats['rejected']}"
     )
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="back_to_admin")]
+    ])
+    await callback.message.edit_text(stats_text, reply_markup=back_kb)
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_broadcast_help")
+async def admin_broadcast_help(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    await callback.message.edit_text(
+        "📢 **Как сделать рассылку:**\n\n"
+        "Просто отправь в чат команду в формате:\n`/broadcast Текст твоей рассылки`",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="back_to_admin")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_post_help")
+async def admin_post_help(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    await callback.message.edit_text(
+        "📝 **Как создать пост:**\n\n"
+        "Отправь команду `/post`, а затем следуй инструкциям бота (отправь фото с текстом).",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="back_to_admin")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_admin")
+async def back_to_admin(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast_help")],
+        [InlineKeyboardButton(text="📝 Создать пост в канал", callback_data="admin_post_help")],
+        [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")]
+    ])
+    await callback.message.edit_text("👑 **Панель управления администратора**\n\nВыбери нужный раздел:", reply_markup=keyboard)
+    await callback.answer()
 
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message, bot: Bot):
@@ -137,7 +198,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer("Привет Настя!")
 
     if user_id in ADMIN_IDS:
-        await message.answer("👑 Привет, босс! Доступна команда создания поста в канал: /post")
+        await message.answer("👑 Привет, босс! Доступна админ-панель: /admin")
 
     await show_main_menu(message)
 
@@ -200,7 +261,10 @@ async def show_profile(callback: CallbackQuery):
 @router.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await show_main_menu(callback.message)
     await callback.answer()
 
@@ -381,7 +445,7 @@ async def reject_report(callback: CallbackQuery):
             await message_to_edit.edit_text(text=text + new_suffix, reply_markup=None)
         await callback.answer("Отклонено.")
     except Exception as e:
-        await callback.answer(f"Ошибка: {e}", show_auth=True) # type: ignore
+        await callback.answer(f"Ошибка: {e}", show_alert=True)
 
 async def main():
     logging.basicConfig(level=logging.INFO)
