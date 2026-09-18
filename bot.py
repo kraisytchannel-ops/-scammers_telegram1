@@ -26,18 +26,20 @@ def load_data():
                     data.get("bot_stats", {"approved": 0, "rejected": 0, "total": 0}),
                     set(data.get("all_users", [])),
                     {int(k): v for k, v in data.get("user_reports_count", {}).items()},
-                    set(data.get("banned_users", []))
+                    set(data.get("banned_users", [])),
+                    set(data.get("approved_scammers", []))
                 )
         except Exception:
             pass
-    return {"approved": 0, "rejected": 0, "total": 0}, set(), {}, set()
+    return {"approved": 0, "rejected": 0, "total": 0}, set(), {}, set(), set()
 
 def save_data():
     data = {
         "bot_stats": bot_stats,
         "all_users": list(all_users),
         "user_reports_count": user_reports_count,
-        "banned_users": list(banned_users)
+        "banned_users": list(banned_users),
+        "approved_scammers": list(approved_scammers)
     }
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -45,7 +47,7 @@ def save_data():
     except Exception as e:
         print(f"Ошибка сохранения данных: {e}")
 
-bot_stats, all_users, user_reports_count, banned_users = load_data()
+bot_stats, all_users, user_reports_count, banned_users, approved_scammers = load_data()
 
 class ReportStates(StatesGroup):
     waiting_for_category = State()
@@ -103,6 +105,7 @@ async def admin_stats_callback(callback: CallbackQuery):
         f"📊 **Подробная статистика бота:**\n\n"
         f"👥 Всего пользователей: {len(all_users)}\n"
         f"🚫 Заблокировано пользователей: {len(banned_users)}\n"
+        f"🚨 База одобренных скамеров: {len(approved_scammers)}\n"
         f"📥 Всего заявок: {bot_stats['total']}\n"
         f"✅ Одобрено: {bot_stats['approved']}\n"
         f"❌ Отклонено: {bot_stats['rejected']}"
@@ -209,7 +212,6 @@ async def cmd_broadcast(message: Message, bot: Bot):
         await message.answer("⚠️ Напиши текст рассылки после команды.")
         return
     
-    # Отправляем чистый текст без лишних плашек
     formatted_text = text_to_send
     
     count = 0
@@ -237,7 +239,6 @@ async def process_admin_post(message: Message, state: FSMContext):
     user_text = message.caption or ""
     photo_id = message.photo[-1].file_id
 
-    # Публикуем чистый текст из подписи без автоматических вставок
     formatted_caption = user_text
     
     await message.answer("👇 Готовый пост:")
@@ -380,9 +381,17 @@ async def check_url_accessibility(url: str) -> str:
 
 @router.message(ReportStates.waiting_for_link, F.text)
 async def process_link(message: Message, state: FSMContext):
-    text = message.text.strip()
-    status_ping = await check_url_accessibility(text)
-    await state.update_data(scammer_link=text, link_status=status_ping)
+    text = message.text.strip().lower()
+    
+    # ПРОВЕРКА НА БАЗУ ОДОБРЕННЫХ СКАМЕРОВ
+    if text in approved_scammers:
+        await message.answer("⚠️ **Внимание!** На этого скамера уже подавали жалобу, и она **уже одобрена** модераторами! Спасибо за бдительность, повторная заявка не требуется.")
+        await state.clear()
+        await show_main_menu(message)
+        return
+
+    status_ping = await check_url_accessibility(message.text.strip())
+    await state.update_data(scammer_link=message.text.strip(), link_status=status_ping)
     await message.answer(f"{status_ping}\n\n💬 Шаг 3: Опиши подробно, что произошло (текст или голосовое):")
     await state.set_state(ReportStates.waiting_for_reason)
 
@@ -470,6 +479,12 @@ async def take_to_check(callback: CallbackQuery, bot: Bot):
             await callback.answer("ID не найден.", show_alert=True)
             return
 
+        # Извлекаем ссылку из текста жалобы для базы скамеров
+        link_match = re.search(r"🔗 Ссылка:\s*([^\n]+)", text)
+        if link_match:
+            scammer_link = link_match.group(1).strip().lower()
+            approved_scammers.add(scammer_link)
+
         id_match = re.search(r"ID:\s*(\d+)", text)
         user_id = int(id_match.group(1))
         
@@ -484,7 +499,7 @@ async def take_to_check(callback: CallbackQuery, bot: Bot):
         else:
             await message_to_edit.edit_text(text=text + new_suffix, reply_markup=None)
 
-        await callback.answer("Готово!")
+        await callback.answer("Готово! Ссылка добавлена в базу скамеров.")
     except Exception as e:
         await callback.answer(f"Ошибка: {e}", show_alert=True)
 
