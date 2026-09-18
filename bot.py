@@ -84,7 +84,7 @@ async def show_admin_menu(message: Message, edit: bool = False):
         [InlineKeyboardButton(text="✅ Разблокировать юзера", callback_data="admin_unban_menu")],
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")]
     ])
-    text = "👑 **Расширенная панель управления администратора**\n\nВыбери нужную функцию ниже:"
+    text = "👑 Расширенная панель управления администратора\n\nВыбери нужную функцию ниже:"
     if edit:
         await message.edit_text(text, reply_markup=keyboard)
     else:
@@ -102,7 +102,7 @@ async def admin_stats_callback(callback: CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
         return
     stats_text = (
-        f"📊 **Подробная статистика бота:**\n\n"
+        f"📊 Подробная статистика бота:\n\n"
         f"👥 Всего пользователей: {len(all_users)}\n"
         f"🚫 Заблокировано пользователей: {len(banned_users)}\n"
         f"🚨 База одобренных скамеров: {len(approved_scammers)}\n"
@@ -121,8 +121,8 @@ async def admin_broadcast_info(callback: CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
         return
     await callback.message.edit_text(
-        "📢 **Рассылка сообщений:**\n\n"
-        "Отправь в чат команду:\n`/broadcast Текст сообщения`\n\n"
+        "📢 Рассылка сообщений:\n\n"
+        "Отправь в чат команду:\n/broadcast Текст сообщения\n\n"
         "Оно автоматически разойдется всем пользователям бота.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
@@ -135,8 +135,8 @@ async def admin_post_info(callback: CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
         return
     await callback.message.edit_text(
-        "📝 **Создание поста:**\n\n"
-        "Отправь команду `/post`, а затем отправь картинку с текстом. Бот перешлет его для твоего Telegram-канала.",
+        "📝 Создание поста:\n\n"
+        "Отправь команду /post, а затем отправь картинку с текстом. Бот перешлет его для твоего Telegram-канала.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
         ])
@@ -148,7 +148,7 @@ async def admin_ban_menu(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id not in ADMIN_IDS:
         return
     await callback.message.edit_text(
-        "🚫 Введи **Telegram ID** пользователя, которого нужно заблокировать:",
+        "🚫 Введи Telegram ID пользователя, которого нужно заблокировать:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_main")]
         ])
@@ -177,7 +177,7 @@ async def admin_unban_menu(callback: CallbackQuery, state: FSMContext):
         return
     await callback.message.edit_text(
         f"✅ Заблокированные ID: {list(banned_users) if banned_users else 'Список пуст'}\n\n"
-        "Введи **Telegram ID** пользователя для разблокировки:",
+        "Введи Telegram ID пользователя для разблокировки:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_main")]
         ])
@@ -383,9 +383,8 @@ async def check_url_accessibility(url: str) -> str:
 async def process_link(message: Message, state: FSMContext):
     text = message.text.strip().lower()
     
-    # ПРОВЕРКА НА БАЗУ ОДОБРЕННЫХ СКАМЕРОВ
     if text in approved_scammers:
-        await message.answer("⚠️ **Внимание!** На этого скамера уже подавали жалобу, и она **уже одобрена** модераторами! Спасибо за бдительность, повторная заявка не требуется.")
+        await message.answer("⚠️ Внимание! На этого скамера уже подавали жалобу, и она уже одобрена модераторами! Спасибо за бдительность, повторная заявка не требуется.")
         await state.clear()
         await show_main_menu(message)
         return
@@ -479,7 +478,6 @@ async def take_to_check(callback: CallbackQuery, bot: Bot):
             await callback.answer("ID не найден.", show_alert=True)
             return
 
-        # Извлекаем ссылку из текста жалобы для базы скамеров
         link_match = re.search(r"🔗 Ссылка:\s*([^\n]+)", text)
         if link_match:
             scammer_link = link_match.group(1).strip().lower()
