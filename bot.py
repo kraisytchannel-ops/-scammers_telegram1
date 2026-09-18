@@ -133,7 +133,7 @@ async def admin_post_info(callback: CallbackQuery):
         return
     await callback.message.edit_text(
         "📝 **Создание поста:**\n\n"
-        "Отправь команду `/post`, а затем отправь картинку с текстом. Бот красиво оформит ее для твоего Telegram-канала.",
+        "Отправь команду `/post`, а затем отправь картинку с текстом. Бот перешлет его для твоего Telegram-канала.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
         ])
@@ -209,13 +209,8 @@ async def cmd_broadcast(message: Message, bot: Bot):
         await message.answer("⚠️ Напиши текст рассылки после команды.")
         return
     
-    formatted_text = (
-        f"‼️ ВАЖНО ‼️\n\n"
-        f"{text_to_send}\n\n"
-        f"———————————————\n"
-        f"🤖 Отправить скамера — @SendTheScammerBot\n"
-        f"📢 Новости — @scammers_telegram1 | Подпишись!"
-    )
+    # Отправляем чистый текст без лишних плашек
+    formatted_text = text_to_send
     
     count = 0
     for uid in all_users:
@@ -242,13 +237,9 @@ async def process_admin_post(message: Message, state: FSMContext):
     user_text = message.caption or ""
     photo_id = message.photo[-1].file_id
 
-    formatted_caption = (
-        "‼️ ВАЖНО ‼️\n\n"
-        f"{user_text}\n\n"
-        "———————————————\n"
-        "🤖 Отправить скамера — @SendTheScammerBot\n"
-        "📢 Новости — @scammers_telegram1 | Подпишись!"
-    )
+    # Публикуем чистый текст из подписи без автоматических вставок
+    formatted_caption = user_text
+    
     await message.answer("👇 Готовый пост:")
     await message.answer_photo(photo=photo_id, caption=formatted_caption)
     await state.clear()
