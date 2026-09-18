@@ -136,7 +136,7 @@ async def admin_post_info(callback: CallbackQuery):
         return
     await callback.message.edit_text(
         "📝 Создание поста:\n\n"
-        "Отправь команду /post, а затем отправь картинку с текстом. Бот перешлет его для твоего Telegram-канала.",
+        "Отправь команду /post, а затем отправь картинку с текстом. Бот автоматически добавит призыв подписаться и перешлет готовый пост.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
         ])
@@ -164,7 +164,7 @@ async def process_ban(message: Message, state: FSMContext):
         target_id = int(message.text.strip())
         banned_users.add(target_id)
         save_data()
-        await message.answer(f"✅ Пользователь с ID `{target_id}` успешно заблокирован.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        await message.answer(f"✅ Пользователь с ID {target_id} успешно заблокирован.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👑 В админку", callback_data="admin_main")]
         ]))
     except ValueError:
@@ -194,7 +194,7 @@ async def process_unban(message: Message, state: FSMContext):
         if target_id in banned_users:
             banned_users.remove(target_id)
             save_data()
-            await message.answer(f"✅ Пользователь с ID `{target_id}` разблокирован.")
+            await message.answer(f"✅ Пользователь с ID {target_id} разблокирован.")
         else:
             await message.answer("⚠️ Этот ID не найден в списке заблокированных.")
     except ValueError:
@@ -212,14 +212,12 @@ async def cmd_broadcast(message: Message, bot: Bot):
         await message.answer("⚠️ Напиши текст рассылки после команды.")
         return
     
-    formatted_text = text_to_send
-    
     count = 0
     for uid in all_users:
         if uid in banned_users:
             continue
         try:
-            await bot.send_message(uid, formatted_text)
+            await bot.send_message(uid, text_to_send)
             count += 1
         except Exception:
             pass
@@ -239,7 +237,9 @@ async def process_admin_post(message: Message, state: FSMContext):
     user_text = message.caption or ""
     photo_id = message.photo[-1].file_id
 
-    formatted_caption = user_text
+    # Автоматически добавляем призыв подписаться в конец поста
+    footer_text = "\n\n⚠️ Внимание! Подпишитесь на наш канал и защитите себя от мошенников!"
+    formatted_caption = user_text + footer_text
     
     await message.answer("👇 Готовый пост:")
     await message.answer_photo(photo=photo_id, caption=formatted_caption)
