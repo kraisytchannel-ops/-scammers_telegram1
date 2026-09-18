@@ -136,7 +136,7 @@ async def admin_post_info(callback: CallbackQuery):
         return
     await callback.message.edit_text(
         "📝 Создание поста:\n\n"
-        "Отправь команду /post, а затем отправь картинку с текстом. Бот автоматически добавит призыв подписаться и перешлет готовый пост.",
+        "Отправь команду /post, а затем отправь картинку с текстом. Бот автоматически добавит плашку и призыв подписаться.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
         ])
@@ -237,9 +237,11 @@ async def process_admin_post(message: Message, state: FSMContext):
     user_text = message.caption or ""
     photo_id = message.photo[-1].file_id
 
-    # Автоматически добавляем призыв подписаться в конец поста
-    footer_text = "\n\n⚠️ Внимание! Подпишитесь на наш канал и защитите себя от мошенников!"
-    formatted_caption = user_text + footer_text
+    # Четкие элементы шапки и подвала без задвоения
+    header = "‼️ВНИМАНИЕ ‼️\n\n"
+    footer = "\n\nОтправить скамера - @SendTheScammerBot | @scammers_telegram1 - подпишись на новости"
+    
+    formatted_caption = header + user_text + footer
     
     await message.answer("👇 Готовый пост:")
     await message.answer_photo(photo=photo_id, caption=formatted_caption)
