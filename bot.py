@@ -10,7 +10,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Message
 import aiohttp
 
-# Берём токен из переменных окружения Render (безопасно!)
 TOKEN = os.getenv("BOT_TOKEN", "8186611679:AAH2IXX-uATInkuTO3qrzP8df3bJdoxr6hU")
 MODERATOR_CHAT_ID = -5453392098
 ADMIN_IDS = {7346241328, 1753821033}
@@ -26,17 +25,19 @@ def load_data():
                 return (
                     data.get("bot_stats", {"approved": 0, "rejected": 0, "total": 0}),
                     set(data.get("all_users", [])),
-                    {int(k): v for k, v in data.get("user_reports_count", {}).items()}
+                    {int(k): v for k, v in data.get("user_reports_count", {}).items()},
+                    set(data.get("banned_users", []))
                 )
         except Exception:
             pass
-    return {"approved": 0, "rejected": 0, "total": 0}, set(), {}
+    return {"approved": 0, "rejected": 0, "total": 0}, set(), {}, set()
 
 def save_data():
     data = {
         "bot_stats": bot_stats,
         "all_users": list(all_users),
-        "user_reports_count": user_reports_count
+        "user_reports_count": user_reports_count,
+        "banned_users": list(banned_users)
     }
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -44,7 +45,7 @@ def save_data():
     except Exception as e:
         print(f"Ошибка сохранения данных: {e}")
 
-bot_stats, all_users, user_reports_count = load_data()
+bot_stats, all_users, user_reports_count, banned_users = load_data()
 
 class ReportStates(StatesGroup):
     waiting_for_category = State()
@@ -55,83 +56,150 @@ class ReportStates(StatesGroup):
 class AdminPostStates(StatesGroup):
     waiting_for_content = State()
 
+class AdminActionStates(StatesGroup):
+    waiting_for_ban_id = State()
+    waiting_for_unban_id = State()
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Действие отменено. Напиши /start для возврата в меню.")
+    await message.answer("❌ Действие отменено.")
 
-# НОРМАЛЬНАЯ АДМИН-ПАНЕЛЬ ПО КОМАНДЕ /admin
+# --- РАСШИРЕННАЯ АДМИН-ПАНЕЛЬ ---
 @router.message(Command("admin"))
-async def cmd_admin(message: Message):
+async def cmd_admin(message: Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
+    await state.clear()
+    await show_admin_menu(message)
+
+async def show_admin_menu(message: Message, edit: bool = False):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast_help")],
-        [InlineKeyboardButton(text="📝 Создать пост в канал", callback_data="admin_post_help")],
+        [InlineKeyboardButton(text="📊 Статистика системы", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast_info")],
+        [InlineKeyboardButton(text="📝 Создать пост в канал", callback_data="admin_post_info")],
+        [InlineKeyboardButton(text="🚫 Заблокировать юзера", callback_data="admin_ban_menu")],
+        [InlineKeyboardButton(text="✅ Разблокировать юзера", callback_data="admin_unban_menu")],
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")]
     ])
-    await message.answer("👑 **Панель управления администратора**\n\nВыбери нужный раздел:", reply_markup=keyboard)
+    text = "👑 **Расширенная панель управления администратора**\n\nВыбери нужную функцию ниже:"
+    if edit:
+        await message.edit_text(text, reply_markup=keyboard)
+    else:
+        await message.answer(text, reply_markup=keyboard)
+
+@router.callback_query(F.data == "admin_main")
+async def admin_main_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    await show_admin_menu(callback.message, edit=True)
+    await callback.answer()
 
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats_callback(callback: CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ Нет доступа", show_alert=True)
         return
-    
     stats_text = (
-        f"📊 **Статистика бота:**\n\n"
+        f"📊 **Подробная статистика бота:**\n\n"
         f"👥 Всего пользователей: {len(all_users)}\n"
+        f"🚫 Заблокировано пользователей: {len(banned_users)}\n"
         f"📥 Всего заявок: {bot_stats['total']}\n"
         f"✅ Одобрено: {bot_stats['approved']}\n"
         f"❌ Отклонено: {bot_stats['rejected']}"
     )
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="back_to_admin")]
+        [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
     ])
     await callback.message.edit_text(stats_text, reply_markup=back_kb)
     await callback.answer()
 
-@router.callback_query(F.data == "admin_broadcast_help")
-async def admin_broadcast_help(callback: CallbackQuery):
+@router.callback_query(F.data == "admin_broadcast_info")
+async def admin_broadcast_info(callback: CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
         return
     await callback.message.edit_text(
-        "📢 **Как сделать рассылку:**\n\n"
-        "Просто отправь в чат команду в формате:\n`/broadcast Текст твоей рассылки`",
+        "📢 **Рассылка сообщений:**\n\n"
+        "Отправь в чат команду:\n`/broadcast Текст сообщения`\n\n"
+        "Оно автоматически разойдется всем пользователям бота.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="back_to_admin")]
+            [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
         ])
     )
     await callback.answer()
 
-@router.callback_query(F.data == "admin_post_help")
-async def admin_post_help(callback: CallbackQuery):
+@router.callback_query(F.data == "admin_post_info")
+async def admin_post_info(callback: CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
         return
     await callback.message.edit_text(
-        "📝 **Как создать пост:**\n\n"
-        "Отправь команду `/post`, а затем следуй инструкциям бота (отправь фото с текстом).",
+        "📝 **Создание поста:**\n\n"
+        "Отправь команду `/post`, а затем отправь картинку с текстом. Бот красиво оформит ее для твоего Telegram-канала.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="back_to_admin")]
+            [InlineKeyboardButton(text="🔙 Назад в админку", callback_data="admin_main")]
         ])
     )
     await callback.answer()
 
-@router.callback_query(F.data == "back_to_admin")
-async def back_to_admin(callback: CallbackQuery):
+@router.callback_query(F.data == "admin_ban_menu")
+async def admin_ban_menu(callback: CallbackQuery, state: FSMContext):
     if callback.from_user.id not in ADMIN_IDS:
         return
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Сделать рассылку", callback_data="admin_broadcast_help")],
-        [InlineKeyboardButton(text="📝 Создать пост в канал", callback_data="admin_post_help")],
-        [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_menu")]
-    ])
-    await callback.message.edit_text("👑 **Панель управления администратора**\n\nВыбери нужный раздел:", reply_markup=keyboard)
+    await callback.message.edit_text(
+        "🚫 Введи **Telegram ID** пользователя, которого нужно заблокировать:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_main")]
+        ])
+    )
+    await state.set_state(AdminActionStates.waiting_for_ban_id)
     await callback.answer()
 
+@router.message(AdminActionStates.waiting_for_ban_id, F.text)
+async def process_ban(message: Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        target_id = int(message.text.strip())
+        banned_users.add(target_id)
+        save_data()
+        await message.answer(f"✅ Пользователь с ID `{target_id}` успешно заблокирован.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👑 В админку", callback_data="admin_main")]
+        ]))
+    except ValueError:
+        await message.answer("⚠️ Неверный формат ID. Введи числовое значение.")
+    await state.clear()
+
+@router.callback_query(F.data == "admin_unban_menu")
+async def admin_unban_menu(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+    await callback.message.edit_text(
+        f"✅ Заблокированные ID: {list(banned_users) if banned_users else 'Список пуст'}\n\n"
+        "Введи **Telegram ID** пользователя для разблокировки:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Отмена", callback_data="admin_main")]
+        ])
+    )
+    await state.set_state(AdminActionStates.waiting_for_unban_id)
+    await callback.answer()
+
+@router.message(AdminActionStates.waiting_for_unban_id, F.text)
+async def process_unban(message: Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    try:
+        target_id = int(message.text.strip())
+        if target_id in banned_users:
+            banned_users.remove(target_id)
+            save_data()
+            await message.answer(f"✅ Пользователь с ID `{target_id}` разблокирован.")
+        else:
+            await message.answer("⚠️ Этот ID не найден в списке заблокированных.")
+    except ValueError:
+        await message.answer("⚠️ Неверный формат ID.")
+    await state.clear()
+    await show_admin_menu(message)
+
+# --- БАЗОВЫЕ КОМАНДЫ И РАССЫЛКИ ---
 @router.message(Command("broadcast"))
 async def cmd_broadcast(message: Message, bot: Bot):
     if message.from_user.id not in ADMIN_IDS:
@@ -151,6 +219,8 @@ async def cmd_broadcast(message: Message, bot: Bot):
     
     count = 0
     for uid in all_users:
+        if uid in banned_users:
+            continue
         try:
             await bot.send_message(uid, formatted_text)
             count += 1
@@ -162,14 +232,13 @@ async def cmd_broadcast(message: Message, bot: Bot):
 async def cmd_post(message: Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         return
-    await message.answer("📸 Отправь мне фото вместе с текстом (одним сообщением), которое нужно оформить для канала.")
+    await message.answer("📸 Отправь мне фото вместе с текстом (одним сообщением) для канала.")
     await state.set_state(AdminPostStates.waiting_for_content)
 
 @router.message(AdminPostStates.waiting_for_content, F.photo)
 async def process_admin_post(message: Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         return
-    
     user_text = message.caption or ""
     photo_id = message.photo[-1].file_id
 
@@ -180,8 +249,7 @@ async def process_admin_post(message: Message, state: FSMContext):
         "🤖 Отправить скамера — @SendTheScammerBot\n"
         "📢 Новости — @scammers_telegram1 | Подпишись!"
     )
-
-    await message.answer("👇 Вот готовый пост. Можешь переслать его в канал:")
+    await message.answer("👇 Готовый пост:")
     await message.answer_photo(photo=photo_id, caption=formatted_caption)
     await state.clear()
 
@@ -189,6 +257,11 @@ async def process_admin_post(message: Message, state: FSMContext):
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
+    
+    if user_id in banned_users:
+        await message.answer("⛔ Вы заблокированы в использовании этого бота.")
+        return
+
     all_users.add(user_id)
     save_data()
     
@@ -198,7 +271,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer("Привет Настя!")
 
     if user_id in ADMIN_IDS:
-        await message.answer("👑 Привет, босс! Доступна админ-панель: /admin")
+        await message.answer("👑 Открыта админ-панель: введи /admin")
 
     await show_main_menu(message)
 
@@ -214,7 +287,6 @@ async def show_main_menu(message: Message):
         [InlineKeyboardButton(text="👤 Мой профиль", callback_data="menu_profile")],
         [InlineKeyboardButton(text="📜 Правила / Инфо", callback_data="menu_rules")]
     ])
-
     if os.path.exists(photo_path):
         await message.answer_photo(photo=FSInputFile(photo_path), caption=main_menu_text, reply_markup=keyboard)
     else:
@@ -225,9 +297,8 @@ async def show_rules(callback: CallbackQuery):
     rules_text = (
         "📜 Правила сервиса:\n\n"
         "1. Не отправляй ложные жалобы.\n"
-        "2. Прикладывай скриншоты для быстрого рассмотрения модераторами.\n"
-        "3. Все данные проверяются автоматически.\n\n"
-        "Нажми кнопку ниже, чтобы вернуться в меню."
+        "2. Прикладывай скриншоты для быстрого рассмотрения.\n"
+        "3. Все данные проверяются автоматически."
     )
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Назад в меню", callback_data="back_to_menu")]
@@ -270,6 +341,9 @@ async def back_to_menu(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "menu_report")
 async def start_report_flow(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id in banned_users:
+        await callback.answer("⛔ Вы заблокированы.", show_alert=True)
+        return
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 Скам на Телеграм-подарки", callback_data="cat_gifts")],
         [InlineKeyboardButton(text="🤖 Спам-бот / Рассылка", callback_data="cat_spam")],
@@ -293,8 +367,7 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
     }
     cat_name = categories.get(callback.data, "📂 Другое")
     await state.update_data(category=cat_name)
-    
-    text = f"Категория: {cat_name}\n\n🔗 Шаг 2: Отправь ссылку на аккаунт, канал или сайт (например: @username или t.me/...):"
+    text = f"Категория: {cat_name}\n\n🔗 Шаг 2: Отправь ссылку на аккаунт, канал или сайт (@username или t.me/...):"
     if callback.message.photo:
         await callback.message.edit_caption(caption=text, reply_markup=None)
     else:
@@ -317,10 +390,6 @@ async def check_url_accessibility(url: str) -> str:
 @router.message(ReportStates.waiting_for_link, F.text)
 async def process_link(message: Message, state: FSMContext):
     text = message.text.strip()
-    if "t.me/" not in text and "@" not in text and "http" not in text:
-        await message.answer("⚠️ Пожалуйста, отправь корректную ссылку или юзернейм с @:")
-        return
-
     status_ping = await check_url_accessibility(text)
     await state.update_data(scammer_link=text, link_status=status_ping)
     await message.answer(f"{status_ping}\n\n💬 Шаг 3: Опиши подробно, что произошло (текст или голосовое):")
@@ -337,7 +406,7 @@ async def process_reason(message: Message, state: FSMContext):
         [InlineKeyboardButton(text="✅ Готово, отправить жалобу", callback_data="finish_report")],
         [InlineKeyboardButton(text="⏩ Пропустить скриншоты", callback_data="skip_screenshots")]
     ])
-    await message.answer("📸 Шаг 4: Отправь скриншоты-доказательства.\nКогда закончишь, нажми кнопку ниже:", reply_markup=keyboard)
+    await message.answer("📸 Шаг 4: Отправь скриншоты-доказательства. Когда закончишь, нажми кнопку ниже:", reply_markup=keyboard)
     await state.set_state(ReportStates.waiting_for_screenshots)
 
 @router.message(ReportStates.waiting_for_screenshots, F.photo)
@@ -363,7 +432,6 @@ async def finish_report_handler(callback: CallbackQuery, state: FSMContext, bot:
     bot_stats["total"] += 1
     user = callback.from_user
     user_reports_count[user.id] = user_reports_count.get(user.id, 0) + 1
-    
     save_data()
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -372,7 +440,6 @@ async def finish_report_handler(callback: CallbackQuery, state: FSMContext, bot:
             InlineKeyboardButton(text="❌ Отклонить", callback_data="reject")
         ]
     ])
-
     has_premium = "✨ Есть" if getattr(user, "is_premium", False) else "❌ Нет"
 
     report_text = (
@@ -400,7 +467,7 @@ async def finish_report_handler(callback: CallbackQuery, state: FSMContext, bot:
         await bot.send_message(chat_id=MODERATOR_CHAT_ID, text=report_text, reply_markup=keyboard)
 
     await state.clear()
-    await callback.message.answer("✅ Жалоба успешно отправлена модераторам! Спасибо за помощь сообществу.")
+    await callback.message.answer("✅ Жалоба успешно отправлена модераторам!")
     await show_main_menu(callback.message)
 
 @router.callback_query(F.data == "take_check")
